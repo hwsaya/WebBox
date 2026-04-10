@@ -9,6 +9,7 @@ import com.google.gson.reflect.TypeToken
 
 data class WebSite(val name: String, val url: String)
 data class WebDavConfig(val url: String, val user: String, val pass: String, val autoBackup: Boolean = false)
+data class SiteCredential(val url: String, val user: String, val pass: String)
 
 class PrefsHelper(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("web_manager_v2", Context.MODE_PRIVATE)
@@ -54,5 +55,15 @@ class PrefsHelper(context: Context) {
     fun getLruSize(): Int = prefs.getInt("lru_size", 3)
     fun saveLruSettings(enabled: Boolean, size: Int) {
         prefs.edit().putBoolean("lru_enabled", enabled).putInt("lru_size", size).apply()
+    }
+
+    fun getSiteCredentials(): List<SiteCredential> {
+        val json = securePrefs.getString("site_credentials_json", null) ?: return emptyList()
+        val type = TypeToken.getParameterized(List::class.java, SiteCredential::class.java).type
+        return try { gson.fromJson(json, type) } catch (e: Exception) { emptyList() }
+    }
+
+    fun saveSiteCredentials(credentials: List<SiteCredential>) {
+        securePrefs.edit().putString("site_credentials_json", gson.toJson(credentials)).apply()
     }
 }
