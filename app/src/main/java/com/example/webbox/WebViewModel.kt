@@ -1,3 +1,4 @@
+WebViewModel.kt
 package com.example.webbox
 
 import android.app.Application
@@ -33,6 +34,8 @@ class WebViewModel(application: Application) : AndroidViewModel(application) {
     var lruEnabled by mutableStateOf(prefsHelper.getLruEnabled())
         private set
     var lruSize by mutableStateOf(prefsHelper.getLruSize())
+        private set
+    var siteCredentials by mutableStateOf(prefsHelper.getSiteCredentials())
         private set
 
     private val _uiEvent = Channel<String>()
@@ -79,11 +82,12 @@ class WebViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteSite(site: WebSite) {
         updateAndSave(webSites.filter { it != site })
+        val newCreds = siteCredentials.filter { it.url != site.url }
+        siteCredentials = newCreds
+        prefsHelper.saveSiteCredentials(newCreds)
         WebViewPool.remove(site.url)
     }
 
-    // BUG FIX: was using swap (swaps two positions), but reorderable library calls onMove
-    // incrementally, so the correct operation is "move" (remove then insert at target index).
     fun swapSites(fromIndex: Int, toIndex: Int) {
         if (fromIndex in webSites.indices && toIndex in webSites.indices) {
             val list = webSites.toMutableList()
@@ -91,6 +95,21 @@ class WebViewModel(application: Application) : AndroidViewModel(application) {
             updateAndSave(list)
         }
     }
+
+    fun saveCredential(url: String, user: String, pass: String) {
+        val existing = siteCredentials.toMutableList()
+        val index = existing.indexOfFirst { it.url == url }
+        if (index >= 0) {
+            existing[index] = SiteCredential(url, user, pass)
+        } else {
+            existing.add(SiteCredential(url, user, pass))
+        }
+        siteCredentials = existing
+        prefsHelper.saveSiteCredentials(existing)
+        enqueueAutoBackup()
+    }
+
+    fun getCredentialForUrl(url: String): SiteCredential? = siteCredentials.find { it.url == url }
 
     private fun formatUrl(url: String): String =
         if (!url.startsWith("http://") && !url.startsWith("https://")) "http://$url" else url
@@ -123,8 +142,12 @@ class WebViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val cookieManager = CookieManager.getInstance()
                 val backupData = webSites.map { site ->
+                    val cred = siteCredentials.find { it.url == site.url }
                     mapOf("name" to site.name, "url" to site.url,
-                        "cookie" to (cookieManager.getCookie(site.url) ?: ""))
+                        "cookie" to (cookieManager.getCookie(site.url) ?: ""),
+                        "loginUser" to (cred?.user ?: ""),
+                        "loginPass" to (cred?.pass ?: "")
+                    )
                 }
                 val rawJson = Gson().toJson(backupData)
                 val currentHash = rawJson.hashCode()
@@ -136,7 +159,6 @@ class WebViewModel(application: Application) : AndroidViewModel(application) {
                 val fileUrl = "$baseUrl/WebBox/WebBox_Secure.dat"
                 val credential = Credentials.basic(config.user, config.pass)
 
-                // Fire MKCOL — result intentionally ignored for AList compatibility
                 try {
                     httpClient.newCall(
                         Request.Builder().url(dirUrl).method("MKCOL", null)
@@ -144,7 +166,6 @@ class WebViewModel(application: Application) : AndroidViewModel(application) {
                     ).execute().close()
                 } catch (_: Exception) {}
 
-                // Poll until directory is confirmed ready (handles AList path-mapping delay)
                 val deadline = System.currentTimeMillis() + 20_000L
                 var dirReady = false
                 val propfindReq = Request.Builder().url(dirUrl)
@@ -216,17 +237,27 @@ class WebViewModel(application: Application) : AndroidViewModel(application) {
                             val type = object : TypeToken<List<Map<String, String>>>() {}.type
                             val list: List<Map<String, String>> = Gson().fromJson(json, type) ?: emptyList()
                             val cookieManager = CookieManager.getInstance()
+                            val newCreds = mutableListOf<SiteCredential>()
                             val newSites = list.mapNotNull { map ->
                                 val name = map["name"].orEmpty()
                                 val url = map["url"].orEmpty()
                                 if (name.isBlank() || url.isBlank()) return@mapNotNull null
                                 map["cookie"]?.takeIf { it.isNotBlank() }
                                     ?.let { cookieManager.setCookie(url, it) }
+                                
+                                val user = map["loginUser"].orEmpty()
+                                val pass = map["loginPass"].orEmpty()
+                                if (user.isNotBlank() || pass.isNotBlank()) {
+                                    newCreds.add(SiteCredential(url, user, pass))
+                                }
+                                
                                 WebSite(name, url)
                             }
                             cookieManager.flush()
                             webSites = newSites
+                            siteCredentials = newCreds
                             prefsHelper.saveSites(newSites)
+                            prefsHelper.saveSiteCredentials(newCreds)
                             lastBackupHash = json.hashCode()
                             _uiEvent.send("配置恢复成功")
                         } catch (_: Exception) { _uiEvent.send("解析失败") }
