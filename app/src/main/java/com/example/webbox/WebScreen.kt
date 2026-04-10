@@ -279,7 +279,7 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
 
                                                 var script = document.createElement('script');
                                                 script.type = 'text/javascript';
-                                                script.src = '[https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit](https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit)';
+                                                script.src = 'https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit';
                                                 document.head.appendChild(script);
 
                                                 window.googleTranslateElementInit = function() {
@@ -334,35 +334,67 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
 
                             urlString?.let { currentUrl ->
                                 val cred = viewModel.getCredentialForUrl(currentUrl) 
-                                if (cred != null && cred.user.isNotBlank() && cred.pass.isNotBlank()) {
+                                if (cred != null && (cred.user.isNotBlank() || cred.pass.isNotBlank())) {
+                                    // 更加智能、能穿透 React/Vue 组件、兼容单项 Token 的输入脚本
+                                    val safeUser = cred.user.replace("'", "\\'")
+                                    val safePass = cred.pass.replace("'", "\\'")
+                                    
                                     val autoLoginJs = """
                                         (function() {
-                                            var inputs = document.getElementsByTagName('input');
-                                            var userBox = null;
-                                            var passBox = null;
-                                            var submitBtn = document.querySelector('button[type="submit"], input[type="submit"]');
+                                            var attempts = 0;
+                                            var userVal = '$safeUser';
+                                            var passVal = '$safePass';
+                                            if (!userVal && !passVal) return;
 
-                                            for (var i = 0; i < inputs.length; i++) {
-                                                var type = inputs[i].type.toLowerCase();
-                                                if ((type === 'text' || type === 'email' || type === 'number') && !userBox) {
-                                                    userBox = inputs[i];
-                                                }
-                                                if (type === 'password' && !passBox) {
-                                                    passBox = inputs[i];
-                                                }
-                                            }
+                                            var timer = setInterval(function() {
+                                                attempts++;
+                                                if (attempts > 15) { clearInterval(timer); return; }
 
-                                            if (userBox && passBox) {
-                                                userBox.value = '${cred.user}';
-                                                passBox.value = '${cred.pass}';
-                                                
-                                                userBox.dispatchEvent(new Event('input', { bubbles: true }));
-                                                passBox.dispatchEvent(new Event('input', { bubbles: true }));
+                                                var inputs = Array.from(document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="checkbox"]):not([type="radio"])'));
+                                                if (inputs.length === 0) return;
 
-                                                if(submitBtn) {
-                                                    setTimeout(function() { submitBtn.click(); }, 500);
+                                                function setNativeValue(element, value) {
+                                                    if (!element || !value || element.value === value) return;
+                                                    var valueSetter = Object.getOwnPropertyDescriptor(element, 'value');
+                                                    var prototype = Object.getPrototypeOf(element);
+                                                    var prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value');
+                                                    
+                                                    if (prototypeValueSetter && prototypeValueSetter.set) {
+                                                        prototypeValueSetter.set.call(element, value);
+                                                    } else if (valueSetter && valueSetter.set) {
+                                                        valueSetter.set.call(element, value);
+                                                    } else {
+                                                        element.value = value;
+                                                    }
+                                                    element.dispatchEvent(new Event('input', { bubbles: true }));
+                                                    element.dispatchEvent(new Event('change', { bubbles: true }));
                                                 }
-                                            }
+
+                                                var userBox = null;
+                                                var passBox = null;
+
+                                                for (var i = 0; i < inputs.length; i++) {
+                                                    if (inputs[i].type.toLowerCase() === 'password') {
+                                                        passBox = inputs[i];
+                                                        if (i > 0) userBox = inputs[i - 1];
+                                                        break;
+                                                    }
+                                                }
+
+                                                if (!passBox && inputs.length > 0) userBox = inputs[0];
+
+                                                var filled = false;
+                                                if (userBox && userVal && userBox.value !== userVal) { setNativeValue(userBox, userVal); filled = true; }
+                                                if (passBox && passVal && passBox.value !== passVal) { setNativeValue(passBox, passVal); filled = true; }
+
+                                                if (filled) {
+                                                    clearInterval(timer);
+                                                    var submitBtn = document.querySelector('button[type="submit"], input[type="submit"], form button:not([type="button"])');
+                                                    if (submitBtn) {
+                                                        setTimeout(function() { submitBtn.click(); }, 600);
+                                                    }
+                                                }
+                                            }, 500);
                                         })();
                                     """.trimIndent()
                                     view.evaluateJavascript(autoLoginJs, null)
