@@ -210,7 +210,6 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
                             fontWeight = FontWeight.Bold
                         )
 
-                        // 标签页按钮换到了菜单左边
                         IconButton(onClick = {
                             WebViewPool.captureSnapshot(url)
                             cachedTabCount = WebViewPool.getCachedUrls().size.coerceAtLeast(1)
@@ -239,7 +238,6 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
                             }
                         }
 
-                        // 菜单框在最右侧
                         Box(contentAlignment = Alignment.TopEnd) {
                             IconButton(onClick = { showMenu = true }) {
                                 Icon(Icons.Default.MoreVert, null, modifier = Modifier.size(24.dp))
@@ -281,7 +279,7 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
 
                                                 var script = document.createElement('script');
                                                 script.type = 'text/javascript';
-                                                script.src = 'https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit';
+                                                script.src = '[https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit](https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit)';
                                                 document.head.appendChild(script);
 
                                                 window.googleTranslateElementInit = function() {
@@ -327,12 +325,49 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
                         }
                         override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                             super.onPageStarted(view, url, favicon)
-                            isTranslated = false // 页面开始加载时重置翻译状态
+                            isTranslated = false
                             if (desktopModeState.value) view.evaluateJavascript(desktopJs, null)
                         }
-                        override fun onPageFinished(view: WebView, url: String?) {
-                            super.onPageFinished(view, url)
+                        override fun onPageFinished(view: WebView, urlString: String?) {
+                            super.onPageFinished(view, urlString)
                             if (desktopModeState.value) view.evaluateJavascript(desktopJs, null)
+
+                            urlString?.let { currentUrl ->
+                                val cred = viewModel.getCredentialForUrl(currentUrl) 
+                                if (cred != null && cred.user.isNotBlank() && cred.pass.isNotBlank()) {
+                                    val autoLoginJs = """
+                                        (function() {
+                                            var inputs = document.getElementsByTagName('input');
+                                            var userBox = null;
+                                            var passBox = null;
+                                            var submitBtn = document.querySelector('button[type="submit"], input[type="submit"]');
+
+                                            for (var i = 0; i < inputs.length; i++) {
+                                                var type = inputs[i].type.toLowerCase();
+                                                if ((type === 'text' || type === 'email' || type === 'number') && !userBox) {
+                                                    userBox = inputs[i];
+                                                }
+                                                if (type === 'password' && !passBox) {
+                                                    passBox = inputs[i];
+                                                }
+                                            }
+
+                                            if (userBox && passBox) {
+                                                userBox.value = '${cred.user}';
+                                                passBox.value = '${cred.pass}';
+                                                
+                                                userBox.dispatchEvent(new Event('input', { bubbles: true }));
+                                                passBox.dispatchEvent(new Event('input', { bubbles: true }));
+
+                                                if(submitBtn) {
+                                                    setTimeout(function() { submitBtn.click(); }, 500);
+                                                }
+                                            }
+                                        })();
+                                    """.trimIndent()
+                                    view.evaluateJavascript(autoLoginJs, null)
+                                }
+                            }
                         }
                     }
                     webView.webChromeClient = object : WebChromeClient() {
@@ -386,7 +421,6 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
     }
 }
 
-// 专门为 WebScreen 定制的菜单，解决了物理像素偏移遮挡图标的问题
 @Composable
 fun WebDropdownMenu(
     expanded: Boolean,
@@ -394,7 +428,7 @@ fun WebDropdownMenu(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val density = LocalDensity.current
-    val yOffset = with(density) { 48.dp.roundToPx() } // 自适应各分辨率设备的 48dp 下偏移
+    val yOffset = with(density) { 48.dp.roundToPx() }
 
     val transitionState = remember { MutableTransitionState(false) }.apply { targetState = expanded }
     if (transitionState.currentState || transitionState.targetState) {
