@@ -66,7 +66,6 @@ import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -89,6 +88,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -538,6 +538,7 @@ fun SettingsTab(navController: NavController, onWebDavClick: () -> Unit, onLruCl
         SettingsCard("自动登录配置", "管理已添加网页的自动登录账号与密码", Icons.Default.Lock) { navController.navigate("auto_login_settings") }
         SettingsCard("主题风格", "自定义应用外观与配色", Icons.Default.Star, showToast)
         SettingsCard("Web 分组", "为您的站点添加分类标签", Icons.Default.List, showToast)
+        SettingsCard("生物识别锁", "保护您的私密站点与配置", Icons.Default.Lock, showToast)
         Spacer(modifier = Modifier.height(32.dp))
     }
 }
@@ -641,7 +642,8 @@ fun LruBottomSheet(viewModel: WebViewModel, onDismiss: () -> Unit) {
     }
 
     if (showInfoDialog) {
-        AlertDialog(
+        /* 省略之前的 AlertDialog，此处依然是 AlertDialog 作为信息提示窗，这部分没问题 */
+        androidx.compose.material3.AlertDialog(
             onDismissRequest = { showInfoDialog = false },
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
             shape = RoundedCornerShape(16.dp),
@@ -825,16 +827,22 @@ fun AutoLoginScreen(navController: NavController, viewModel: WebViewModel) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("自动登录配置", fontWeight = FontWeight.Bold) },
+                title = { Text("自动登录配置", fontWeight = FontWeight.Bold, fontSize = 20.sp) },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "返回")
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
             )
-        }
+        },
+        containerColor = MaterialTheme.colorScheme.background
     ) { paddingValues ->
-        LazyColumn(contentPadding = paddingValues, modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            contentPadding = PaddingValues(top = 12.dp, bottom = paddingValues.calculateBottomPadding() + 32.dp),
+            modifier = Modifier.fillMaxSize().padding(top = paddingValues.calculateTopPadding()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             items(viewModel.webSites) { site ->
                 val cred = viewModel.getCredentialForUrl(site.url)
                 val subtitle = if (cred != null && cred.user.isNotBlank()) "已配置: ${cred.user}" else "未配置"
@@ -850,33 +858,82 @@ fun AutoLoginScreen(navController: NavController, viewModel: WebViewModel) {
     }
 
     selectedSite?.let { site ->
-        var user by remember { mutableStateOf(viewModel.getCredentialForUrl(site.url)?.user ?: "") }
-        var pass by remember { mutableStateOf(viewModel.getCredentialForUrl(site.url)?.pass ?: "") }
-        
-        AlertDialog(
-            onDismissRequest = { selectedSite = null },
-            title = { Text("配置 ${site.name}") },
-            text = {
-                Column {
-                    OutlinedTextField(value = user, onValueChange = { user = it }, label = { Text("账号/邮箱") })
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = pass, 
-                        onValueChange = { pass = it }, 
-                        label = { Text("密码") },
-                        visualTransformation = PasswordVisualTransformation()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(onClick = { 
-                    viewModel.saveCredential(site.url, user, pass)
-                    selectedSite = null 
-                }) { Text("保存") }
-            },
-            dismissButton = {
-                TextButton(onClick = { selectedSite = null }) { Text("取消") }
-            }
+        AutoLoginBottomSheet(
+            site = site, 
+            viewModel = viewModel, 
+            onDismiss = { selectedSite = null }
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AutoLoginBottomSheet(site: WebSite, viewModel: WebViewModel, onDismiss: () -> Unit) {
+    var user by remember { mutableStateOf(viewModel.getCredentialForUrl(site.url)?.user ?: "") }
+    var pass by remember { mutableStateOf(viewModel.getCredentialForUrl(site.url)?.pass ?: "") }
+    
+    val haptic = LocalHapticFeedback.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(24.dp)
+    ) {
+        BouncySheetContent(
+            modifier = Modifier.fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 8.dp)
+                .padding(bottom = 32.dp)
+        ) {
+            Text(
+                "配置 ${site.name}",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+            OutlinedTextField(
+                value = user, 
+                onValueChange = { user = it }, 
+                label = { Text("账号/邮箱") },
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+            )
+            OutlinedTextField(
+                value = pass, 
+                onValueChange = { pass = it }, 
+                label = { Text("密码") },
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+            )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(
+                    onClick = { 
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        viewModel.saveCredential(site.url, user, pass)
+                        onDismiss()
+                    },
+                    modifier = Modifier.weight(1f).height(50.dp)
+                ) { Text("保存") }
+
+                if (viewModel.getCredentialForUrl(site.url) != null) {
+                    Button(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            // 清除该条站点的账号密码
+                            viewModel.saveCredential(site.url, "", "")
+                            onDismiss()
+                        },
+                        modifier = Modifier.weight(1f).height(50.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.Transparent,
+                            contentColor = MaterialTheme.colorScheme.error
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp, MaterialTheme.colorScheme.error.copy(0.5f)
+                        )
+                    ) { Text("清除配置") }
+                }
+            }
+        }
     }
 }
