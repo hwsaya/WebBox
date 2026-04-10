@@ -13,6 +13,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -28,10 +29,13 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -70,24 +74,29 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.navigation.NavController
 import java.net.URLEncoder
 
-// 全局缓存区：确保在 LRU 模式切换标签页时，重新进入 Compose 不会丢失原本的桌面模式状态
 private val desktopModeCache = mutableMapOf<String, Boolean>()
 
 @Composable
@@ -108,10 +117,10 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
     var showTabSwitcher by remember { mutableStateOf(false) }
     var cachedTabCount by remember { mutableIntStateOf(1) }
     var showMenu by remember { mutableStateOf(false) }
+    var isTranslated by remember(url) { mutableStateOf(false) }
 
     val defaultUserAgent = remember { android.webkit.WebSettings.getDefaultUserAgent(context) }
     
-    // 从缓存读取当前域名的模式，避免重组导致状态重置
     var isDesktopMode by remember(url) { mutableStateOf(desktopModeCache[url] ?: false) }
     val desktopModeState = rememberUpdatedState(isDesktopMode)
 
@@ -201,78 +210,7 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
                             fontWeight = FontWeight.Bold
                         )
 
-                        // 菜单框换到了标签页按钮左边
-                        Box(contentAlignment = Alignment.TopEnd) {
-                            IconButton(onClick = { showMenu = true }) {
-                                Icon(Icons.Default.MoreVert, null, modifier = Modifier.size(24.dp))
-                            }
-                            MiuixMenu(
-                                expanded = showMenu,
-                                onDismissRequest = { showMenu = false }
-                            ) {
-                                MiuixMenuItem("刷新网页") {
-                                    showMenu = false
-                                    webView.reload()
-                                }
-                                HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
-                                MiuixMenuItem(if (isDesktopMode) "切换手机模式" else "切换电脑模式") {
-                                    showMenu = false
-                                    isDesktopMode = !isDesktopMode
-                                    desktopModeCache[url] = isDesktopMode // 写入全局缓存
-                                }
-                                HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
-                                MiuixMenuItem("无感机翻") {
-                                    showMenu = false
-                                    val js = """
-                                        (function() {
-                                            if (document.getElementById('google_translate_element')) return;
-                                            
-                                            var style = document.createElement('style');
-                                            style.type = 'text/css';
-                                            // 暴力隐藏 Google 翻译组件本身所有的视觉元素
-                                            style.innerHTML = 'body { top: 0 !important; } .skiptranslate { display: none !important; } #goog-gt-tt { display: none !important; }';
-                                            document.head.appendChild(style);
-
-                                            var div = document.createElement('div');
-                                            div.id = 'google_translate_element';
-                                            div.style.display = 'none';
-                                            document.body.appendChild(div);
-
-                                            var script = document.createElement('script');
-                                            script.type = 'text/javascript';
-                                            script.src = 'https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit';
-                                            document.head.appendChild(script);
-
-                                            window.googleTranslateElementInit = function() {
-                                                new google.translate.TranslateElement({
-                                                    pageLanguage: 'auto',
-                                                    includedLanguages: 'zh-CN',
-                                                    layout: google.translate.TranslateElement.InlineLayout.SIMPLE,
-                                                    autoDisplay: false
-                                                }, 'google_translate_element');
-                                                
-                                                // 延迟自动触发翻译
-                                                setTimeout(function() {
-                                                    var select = document.querySelector('select.goog-te-combo');
-                                                    if (select) {
-                                                        select.value = 'zh-CN';
-                                                        select.dispatchEvent(new Event('change'));
-                                                    }
-                                                }, 1200);
-                                            };
-                                        })();
-                                    """.trimIndent()
-                                    webView.evaluateJavascript(js, null)
-                                }
-                                HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
-                                MiuixMenuItem("恢复原网页") {
-                                    showMenu = false
-                                    webView.reload()
-                                }
-                            }
-                        }
-
-                        // 标签页按钮放置在最右侧
+                        // 标签页按钮换到了菜单左边
                         IconButton(onClick = {
                             WebViewPool.captureSnapshot(url)
                             cachedTabCount = WebViewPool.getCachedUrls().size.coerceAtLeast(1)
@@ -300,6 +238,75 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
                                 )
                             }
                         }
+
+                        // 菜单框在最右侧
+                        Box(contentAlignment = Alignment.TopEnd) {
+                            IconButton(onClick = { showMenu = true }) {
+                                Icon(Icons.Default.MoreVert, null, modifier = Modifier.size(24.dp))
+                            }
+                            WebDropdownMenu(
+                                expanded = showMenu,
+                                onDismissRequest = { showMenu = false }
+                            ) {
+                                MiuixMenuItem("刷新网页") {
+                                    showMenu = false
+                                    webView.reload()
+                                }
+                                HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
+                                MiuixMenuItem(if (isDesktopMode) "切换手机模式" else "切换电脑模式") {
+                                    showMenu = false
+                                    isDesktopMode = !isDesktopMode
+                                    desktopModeCache[url] = isDesktopMode
+                                }
+                                HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
+                                MiuixMenuItem(if (isTranslated) "取消翻译" else "翻译网页") {
+                                    showMenu = false
+                                    if (isTranslated) {
+                                        webView.reload()
+                                    } else {
+                                        isTranslated = true
+                                        val js = """
+                                            (function() {
+                                                if (document.getElementById('google_translate_element')) return;
+                                                
+                                                var style = document.createElement('style');
+                                                style.type = 'text/css';
+                                                style.innerHTML = 'body { top: 0 !important; } .skiptranslate { display: none !important; } #goog-gt-tt { display: none !important; }';
+                                                document.head.appendChild(style);
+
+                                                var div = document.createElement('div');
+                                                div.id = 'google_translate_element';
+                                                div.style.display = 'none';
+                                                document.body.appendChild(div);
+
+                                                var script = document.createElement('script');
+                                                script.type = 'text/javascript';
+                                                script.src = 'https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit';
+                                                document.head.appendChild(script);
+
+                                                window.googleTranslateElementInit = function() {
+                                                    new google.translate.TranslateElement({
+                                                        pageLanguage: 'auto',
+                                                        includedLanguages: 'zh-CN',
+                                                        layout: google.translate.TranslateElement.InlineLayout.SIMPLE,
+                                                        autoDisplay: false
+                                                    }, 'google_translate_element');
+                                                    
+                                                    setTimeout(function() {
+                                                        var select = document.querySelector('select.goog-te-combo');
+                                                        if (select) {
+                                                            select.value = 'zh-CN';
+                                                            select.dispatchEvent(new Event('change'));
+                                                        }
+                                                    }, 1200);
+                                                };
+                                            })();
+                                        """.trimIndent()
+                                        webView.evaluateJavascript(js, null)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -320,6 +327,7 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
                         }
                         override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                             super.onPageStarted(view, url, favicon)
+                            isTranslated = false // 页面开始加载时重置翻译状态
                             if (desktopModeState.value) view.evaluateJavascript(desktopJs, null)
                         }
                         override fun onPageFinished(view: WebView, url: String?) {
@@ -374,6 +382,44 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
                 navController = navController,
                 onClose = { showTabSwitcher = false }
             )
+        }
+    }
+}
+
+// 专门为 WebScreen 定制的菜单，解决了物理像素偏移遮挡图标的问题
+@Composable
+fun WebDropdownMenu(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val density = LocalDensity.current
+    val yOffset = with(density) { 48.dp.roundToPx() } // 自适应各分辨率设备的 48dp 下偏移
+
+    val transitionState = remember { MutableTransitionState(false) }.apply { targetState = expanded }
+    if (transitionState.currentState || transitionState.targetState) {
+        Popup(
+            alignment = Alignment.TopEnd,
+            offset = IntOffset(0, yOffset),
+            onDismissRequest = onDismissRequest,
+            properties = PopupProperties(focusable = true)
+        ) {
+            AnimatedVisibility(
+                visibleState = transitionState,
+                enter = scaleIn(BouncyFloat, transformOrigin = TransformOrigin(1f, 0f)) + fadeIn(tween(150)),
+                exit = scaleOut(tween(200, easing = FastOutSlowInEasing), transformOrigin = TransformOrigin(1f, 0f)) + fadeOut(tween(150))
+            ) {
+                Card(
+                    modifier = Modifier.padding(8.dp).width(IntrinsicSize.Max).shadow(12.dp, RoundedCornerShape(24.dp)),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Column(
+                        modifier = Modifier.defaultMinSize(minWidth = 150.dp).padding(vertical = 8.dp),
+                        content = content
+                    )
+                }
+            }
         }
     }
 }
