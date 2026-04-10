@@ -66,6 +66,7 @@ import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -195,13 +196,10 @@ fun AppNavigation() {
     val navController = rememberNavController()
     val viewModel: WebViewModel = viewModel()
 
+    // 去掉了自定义的淡入淡出 transition，以恢复系统级滑动预测性返回
     NavHost(
         navController = navController,
-        startDestination = "home",
-        enterTransition = { fadeIn(tween(300)) },
-        exitTransition = { fadeOut(tween(300)) },
-        popEnterTransition = { fadeIn(tween(300)) },
-        popExitTransition = { fadeOut(tween(300)) }
+        startDestination = "home"
     ) {
         composable("home") { HomeScreen(navController, viewModel) }
         composable("web/{url}") { backStackEntry ->
@@ -535,7 +533,7 @@ fun SettingsTab(navController: NavController, onWebDavClick: () -> Unit, onLruCl
         )
         SettingsCard("LRU 独立实例", "设置网页后台驻留数量", Icons.Default.Build, onLruClick)
         SettingsCard("WebDAV 同步", "备份站点与登录态数据", Icons.Default.Refresh, onWebDavClick)
-        SettingsCard("自动登录配置", "管理已添加网页的自动登录账号与密码", Icons.Default.Lock) { navController.navigate("auto_login_settings") }
+        SettingsCard("自动登录配置", "管理已添加网页的自动登录信息", Icons.Default.Lock) { navController.navigate("auto_login_settings") }
         SettingsCard("主题风格", "自定义应用外观与配色", Icons.Default.Star, showToast)
         SettingsCard("Web 分组", "为您的站点添加分类标签", Icons.Default.List, showToast)
         SettingsCard("生物识别锁", "保护您的私密站点与配置", Icons.Default.Lock, showToast)
@@ -642,8 +640,7 @@ fun LruBottomSheet(viewModel: WebViewModel, onDismiss: () -> Unit) {
     }
 
     if (showInfoDialog) {
-        /* 省略之前的 AlertDialog，此处依然是 AlertDialog 作为信息提示窗，这部分没问题 */
-        androidx.compose.material3.AlertDialog(
+        AlertDialog(
             onDismissRequest = { showInfoDialog = false },
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
             shape = RoundedCornerShape(16.dp),
@@ -895,13 +892,13 @@ fun AutoLoginBottomSheet(site: WebSite, viewModel: WebViewModel, onDismiss: () -
             OutlinedTextField(
                 value = user, 
                 onValueChange = { user = it }, 
-                label = { Text("账号/邮箱") },
+                label = { Text("凭证 1 (账号/邮箱/Token)") },
                 modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
             )
             OutlinedTextField(
                 value = pass, 
                 onValueChange = { pass = it }, 
-                label = { Text("密码") },
+                label = { Text("凭证 2 (密码/可空)") },
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
             )
@@ -919,7 +916,7 @@ fun AutoLoginBottomSheet(site: WebSite, viewModel: WebViewModel, onDismiss: () -
                     Button(
                         onClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            // 清除该条站点的账号密码
+                            // 清除该条站点的凭证信息
                             viewModel.saveCredential(site.url, "", "")
                             onDismiss()
                         },
