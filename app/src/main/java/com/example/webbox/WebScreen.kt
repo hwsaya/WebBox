@@ -335,64 +335,96 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
                             urlString?.let { currentUrl ->
                                 val cred = viewModel.getCredentialForUrl(currentUrl) 
                                 if (cred != null && (cred.user.isNotBlank() || cred.pass.isNotBlank())) {
-                                    // 更加智能、能穿透 React/Vue 组件、兼容单项 Token 的输入脚本
-                                    val safeUser = cred.user.replace("'", "\\'")
-                                    val safePass = cred.pass.replace("'", "\\'")
+                                    // 转义引号，防止 JS 注入失败
+                                    val safeUser = cred.user.replace("\\", "\\\\").replace("'", "\\'").replace("\"", "\\\"")
+                                    val safePass = cred.pass.replace("\\", "\\\\").replace("'", "\\'").replace("\"", "\\\"")
                                     
                                     val autoLoginJs = """
                                         (function() {
-                                            var attempts = 0;
                                             var userVal = '$safeUser';
                                             var passVal = '$safePass';
                                             if (!userVal && !passVal) return;
 
+                                            var attempts = 0;
+                                            // 使用轮询，防止现代框架渲染延迟
                                             var timer = setInterval(function() {
                                                 attempts++;
-                                                if (attempts > 15) { clearInterval(timer); return; }
+                                                if (attempts > 20) { clearInterval(timer); return; }
 
-                                                var inputs = Array.from(document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="checkbox"]):not([type="radio"])'));
-                                                if (inputs.length === 0) return;
+                                                // 只寻找真正在屏幕上可见的输入框（过滤掉框架经常生成的隐藏占位框）
+                                                var allInputs = Array.from(document.querySelectorAll('input'));
+                                                var visibleInputs = allInputs.filter(function(el) {
+                                                    var style = window.getComputedStyle(el);
+                                                    return style.display !== 'none' && 
+                                                           style.visibility !== 'hidden' && 
+                                                           el.offsetWidth > 0 &&
+                                                           !['hidden', 'submit', 'button', 'checkbox', 'radio', 'file', 'image'].includes(el.type.toLowerCase());
+                                                });
 
-                                                function setNativeValue(element, value) {
-                                                    if (!element || !value || element.value === value) return;
-                                                    var valueSetter = Object.getOwnPropertyDescriptor(element, 'value');
-                                                    var prototype = Object.getPrototypeOf(element);
-                                                    var prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value');
-                                                    
-                                                    if (prototypeValueSetter && prototypeValueSetter.set) {
-                                                        prototypeValueSetter.set.call(element, value);
-                                                    } else if (valueSetter && valueSetter.set) {
-                                                        valueSetter.set.call(element, value);
-                                                    } else {
-                                                        element.value = value;
-                                                    }
-                                                    element.dispatchEvent(new Event('input', { bubbles: true }));
-                                                    element.dispatchEvent(new Event('change', { bubbles: true }));
-                                                }
+                                                if (visibleInputs.length === 0) return;
 
-                                                var userBox = null;
                                                 var passBox = null;
+                                                var userBox = null;
 
-                                                for (var i = 0; i < inputs.length; i++) {
-                                                    if (inputs[i].type.toLowerCase() === 'password') {
-                                                        passBox = inputs[i];
-                                                        if (i > 0) userBox = inputs[i - 1];
+                                                for (var i = 0; i < visibleInputs.length; i++) {
+                                                    if (visibleInputs[i].type.toLowerCase() === 'password') {
+                                                        passBox = visibleInputs[i];
+                                                        if (i > 0) userBox = visibleInputs[i - 1]; // 通常密码框前一个就是账号框
                                                         break;
                                                     }
                                                 }
 
-                                                if (!passBox && inputs.length > 0) userBox = inputs[0];
+                                                // 如果没有密码框，说明可能是单纯输入 Token，使用第一个有效输入框
+                                                if (!passBox && visibleInputs.length > 0) {
+                                                    userBox = visibleInputs[0];
+                                                }
 
-                                                var filled = false;
-                                                if (userBox && userVal && userBox.value !== userVal) { setNativeValue(userBox, userVal); filled = true; }
-                                                if (passBox && passVal && passBox.value !== passVal) { setNativeValue(passBox, passVal); filled = true; }
-
-                                                if (filled) {
-                                                    clearInterval(timer);
-                                                    var submitBtn = document.querySelector('button[type="submit"], input[type="submit"], form button:not([type="button"])');
-                                                    if (submitBtn) {
-                                                        setTimeout(function() { submitBtn.click(); }, 600);
+                                                // 模拟人类真实操作：获取焦点 -> 改值 -> 失去焦点
+                                                function simulateInput(element, value) {
+                                                    if (!element || !value || element.value === value) return false;
+                                                    
+                                                    element.focus();
+                                                    
+                                                    // 绕过 Vue/React 的状态管理劫持
+                                                    var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+                                                    if (nativeInputValueSetter && nativeInputValueSetter.set) {
+                                                        nativeInputValueSetter.set.call(element, value);
+                                                    } else {
+                                                        element.value = value;
                                                     }
+
+                                                    element.dispatchEvent(new Event('input', { bubbles: true }));
+                                                    element.dispatchEvent(new Event('change', { bubbles: true }));
+                                                    element.blur();
+                                                    return true;
+                                                }
+
+                                                var userFilled = userVal ? simulateInput(userBox, userVal) : false;
+                                                var passFilled = passVal ? simulateInput(passBox, passVal) : false;
+
+                                                // 只要成功填入了一个，就尝试去点击登录按钮
+                                                if (userFilled || passFilled) {
+                                                    clearInterval(timer);
+                                                    
+                                                    setTimeout(function() {
+                                                        // 1. 尝试找标准的 Submit 按钮
+                                                        var submitBtn = document.querySelector('button[type="submit"], input[type="submit"]');
+                                                        if (!submitBtn) {
+                                                            // 2. 现代网页按钮多为 div 或无属性 button，通过文字模糊匹配
+                                                            var btns = Array.from(document.querySelectorAll('button, div[role="button"]'));
+                                                            submitBtn = btns.find(function(b) {
+                                                                return /登录|login|sign in|确认|submit/i.test(b.innerText || b.value);
+                                                            });
+                                                        }
+
+                                                        if (submitBtn) {
+                                                            submitBtn.click();
+                                                        } else if (passBox) {
+                                                            // 3. 兜底方案：在密码框中按下回车键
+                                                            var enterEvent = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, keyCode: 13, key: 'Enter' });
+                                                            passBox.dispatchEvent(enterEvent);
+                                                        }
+                                                    }, 800);
                                                 }
                                             }, 500);
                                         })();
