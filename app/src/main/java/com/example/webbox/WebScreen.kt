@@ -44,9 +44,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -102,6 +104,10 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
     var isBackStarted by remember { mutableStateOf(false) }
     var showTabSwitcher by remember { mutableStateOf(false) }
     var cachedTabCount by remember { mutableIntStateOf(1) }
+
+    // 电脑模式状态
+    val defaultUserAgent = remember { android.webkit.WebSettings.getDefaultUserAgent(context) }
+    var isDesktopMode by remember(url) { mutableStateOf(false) }
 
     val mainContentScale by animateFloatAsState(
         targetValue = if (showTabSwitcher) 0.85f else 1f,
@@ -167,6 +173,17 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold
                         )
+                        
+                        // 电脑模式切换按钮
+                        IconButton(onClick = { isDesktopMode = !isDesktopMode }) {
+                            Icon(
+                                imageVector = if (isDesktopMode) Icons.Default.Computer else Icons.Default.Smartphone,
+                                contentDescription = "电脑模式切换",
+                                modifier = Modifier.size(24.dp),
+                                tint = if (isDesktopMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
                         IconButton(onClick = { webView.reload() }) {
                             Icon(Icons.Default.Refresh, "刷新", modifier = Modifier.size(24.dp))
                         }
@@ -227,6 +244,17 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
                     webView
                 },
                 update = { view ->
+                    // 动态应用电脑端 User-Agent 和缩放配置
+                    val desktopUa = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+                    val targetUa = if (isDesktopMode) desktopUa else defaultUserAgent
+
+                    if (view.settings.userAgentString != targetUa) {
+                        view.settings.userAgentString = targetUa
+                        view.settings.loadWithOverviewMode = isDesktopMode
+                        view.settings.useWideViewPort = isDesktopMode
+                        view.reload()
+                    }
+
                     view.onResume()
                     view.requestLayout()
                 },
