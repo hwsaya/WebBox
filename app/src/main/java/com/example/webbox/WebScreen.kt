@@ -87,6 +87,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.navigation.NavController
 import java.net.URLEncoder
 
+// 全局缓存区：确保在 LRU 模式切换标签页时，重新进入 Compose 不会丢失原本的桌面模式状态
+private val desktopModeCache = mutableMapOf<String, Boolean>()
+
 @Composable
 fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel) {
     val context = LocalContext.current
@@ -107,7 +110,9 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
     var showMenu by remember { mutableStateOf(false) }
 
     val defaultUserAgent = remember { android.webkit.WebSettings.getDefaultUserAgent(context) }
-    var isDesktopMode by remember(url) { mutableStateOf(false) }
+    
+    // 从缓存读取当前域名的模式，避免重组导致状态重置
+    var isDesktopMode by remember(url) { mutableStateOf(desktopModeCache[url] ?: false) }
     val desktopModeState = rememberUpdatedState(isDesktopMode)
 
     val desktopJs = """
@@ -196,6 +201,78 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
                             fontWeight = FontWeight.Bold
                         )
 
+                        // 菜单框换到了标签页按钮左边
+                        Box(contentAlignment = Alignment.TopEnd) {
+                            IconButton(onClick = { showMenu = true }) {
+                                Icon(Icons.Default.MoreVert, null, modifier = Modifier.size(24.dp))
+                            }
+                            MiuixMenu(
+                                expanded = showMenu,
+                                onDismissRequest = { showMenu = false }
+                            ) {
+                                MiuixMenuItem("刷新网页") {
+                                    showMenu = false
+                                    webView.reload()
+                                }
+                                HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
+                                MiuixMenuItem(if (isDesktopMode) "切换手机模式" else "切换电脑模式") {
+                                    showMenu = false
+                                    isDesktopMode = !isDesktopMode
+                                    desktopModeCache[url] = isDesktopMode // 写入全局缓存
+                                }
+                                HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
+                                MiuixMenuItem("无感机翻") {
+                                    showMenu = false
+                                    val js = """
+                                        (function() {
+                                            if (document.getElementById('google_translate_element')) return;
+                                            
+                                            var style = document.createElement('style');
+                                            style.type = 'text/css';
+                                            // 暴力隐藏 Google 翻译组件本身所有的视觉元素
+                                            style.innerHTML = 'body { top: 0 !important; } .skiptranslate { display: none !important; } #goog-gt-tt { display: none !important; }';
+                                            document.head.appendChild(style);
+
+                                            var div = document.createElement('div');
+                                            div.id = 'google_translate_element';
+                                            div.style.display = 'none';
+                                            document.body.appendChild(div);
+
+                                            var script = document.createElement('script');
+                                            script.type = 'text/javascript';
+                                            script.src = 'https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit';
+                                            document.head.appendChild(script);
+
+                                            window.googleTranslateElementInit = function() {
+                                                new google.translate.TranslateElement({
+                                                    pageLanguage: 'auto',
+                                                    includedLanguages: 'zh-CN',
+                                                    layout: google.translate.TranslateElement.InlineLayout.SIMPLE,
+                                                    autoDisplay: false
+                                                }, 'google_translate_element');
+                                                
+                                                // 延迟自动触发翻译
+                                                setTimeout(function() {
+                                                    var select = document.querySelector('select.goog-te-combo');
+                                                    if (select) {
+                                                        select.value = 'zh-CN';
+                                                        select.dispatchEvent(new Event('change'));
+                                                    }
+                                                }, 1200);
+                                            };
+                                        })();
+                                    """.trimIndent()
+                                    webView.evaluateJavascript(js, null)
+                                }
+                                HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
+                                MiuixMenuItem("恢复原网页") {
+                                    showMenu = false
+                                    webView.reload()
+                                }
+                            }
+                        }
+
+                        // 标签页按钮放置在最右侧
                         IconButton(onClick = {
                             WebViewPool.captureSnapshot(url)
                             cachedTabCount = WebViewPool.getCachedUrls().size.coerceAtLeast(1)
@@ -221,57 +298,6 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
                                         )
                                     )
                                 )
-                            }
-                        }
-
-                        Box(contentAlignment = Alignment.TopEnd) {
-                            IconButton(onClick = { showMenu = true }) {
-                                Icon(Icons.Default.MoreVert, null, modifier = Modifier.size(24.dp))
-                            }
-                            MiuixMenu(
-                                expanded = showMenu,
-                                onDismissRequest = { showMenu = false }
-                            ) {
-                                MiuixMenuItem("刷新网页") {
-                                    showMenu = false
-                                    webView.reload()
-                                }
-                                HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
-                                MiuixMenuItem(if (isDesktopMode) "切换手机模式" else "切换电脑模式") {
-                                    showMenu = false
-                                    isDesktopMode = !isDesktopMode
-                                }
-                                HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
-                                MiuixMenuItem("翻译网页") {
-                                    showMenu = false
-                                    val js = """
-                                        (function() {
-                                            if (document.getElementById('google_translate_element')) return;
-                                            var div = document.createElement('div');
-                                            div.id = 'google_translate_element';
-                                            div.style.position = 'fixed';
-                                            div.style.top = '0';
-                                            div.style.left = '0';
-                                            div.style.width = '100%';
-                                            div.style.zIndex = '2147483647';
-                                            div.style.backgroundColor = '#fff';
-                                            div.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
-                                            document.body.insertBefore(div, document.body.firstChild);
-
-                                            var script = document.createElement('script');
-                                            script.type = 'text/javascript';
-                                            script.src = 'https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit';
-                                            document.head.appendChild(script);
-
-                                            window.googleTranslateElementInit = function() {
-                                                new google.translate.TranslateElement({
-                                                    pageLanguage: 'auto'
-                                                }, 'google_translate_element');
-                                            };
-                                        })();
-                                    """.trimIndent()
-                                    webView.evaluateJavascript(js, null)
-                                }
                             }
                         }
                     }
