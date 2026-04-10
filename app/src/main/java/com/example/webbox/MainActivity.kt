@@ -1,3 +1,4 @@
+MainActivity.kt
 package com.example.webbox
 
 import android.os.Build
@@ -40,9 +41,11 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -50,6 +53,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Home
@@ -59,6 +63,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
@@ -84,6 +89,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -132,7 +138,6 @@ import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
-// ── Shared animation specs ─────────────────────────────────────────────────
 val BouncyFloat    = spring<Float>(dampingRatio = 0.6f, stiffness = 250f)
 val BouncyIntOffset = spring<IntOffset>(dampingRatio = 0.6f, stiffness = 250f)
 val BouncyIntSize  = spring<IntSize>(dampingRatio = 0.6f, stiffness = 250f)
@@ -205,6 +210,7 @@ fun AppNavigation() {
             val url = URLDecoder.decode(encodedUrl, StandardCharsets.UTF_8.toString())
             WebScreen(url = url, navController = navController, viewModel = viewModel)
         }
+        composable("auto_login_settings") { AutoLoginScreen(navController, viewModel) }
     }
 }
 
@@ -303,6 +309,7 @@ fun HomeScreen(navController: NavController, viewModel: WebViewModel) {
                     )
                 } else {
                     SettingsTab(
+                        navController = navController,
                         onWebDavClick = { showWebDavSheet = true },
                         onLruClick = { showLruSheet = true }
                     )
@@ -514,7 +521,7 @@ fun BouncySheetContent(modifier: Modifier = Modifier, content: @Composable Colum
 }
 
 @Composable
-fun SettingsTab(onWebDavClick: () -> Unit, onLruClick: () -> Unit) {
+fun SettingsTab(navController: NavController, onWebDavClick: () -> Unit, onLruClick: () -> Unit) {
     val context = LocalContext.current
     val showToast = { Toast.makeText(context, "规划中", Toast.LENGTH_SHORT).show() }
 
@@ -529,9 +536,9 @@ fun SettingsTab(onWebDavClick: () -> Unit, onLruClick: () -> Unit) {
         )
         SettingsCard("LRU 独立实例", "设置网页后台驻留数量", Icons.Default.Build, onLruClick)
         SettingsCard("WebDAV 同步", "备份站点与登录态数据", Icons.Default.Refresh, onWebDavClick)
+        SettingsCard("自动登录配置", "管理已添加网页的自动登录账号与密码", Icons.Default.Lock) { navController.navigate("auto_login_settings") }
         SettingsCard("主题风格", "自定义应用外观与配色", Icons.Default.Star, showToast)
         SettingsCard("Web 分组", "为您的站点添加分类标签", Icons.Default.List, showToast)
-        SettingsCard("生物识别锁", "保护您的私密站点与配置", Icons.Default.Lock, showToast)
         Spacer(modifier = Modifier.height(32.dp))
     }
 }
@@ -673,7 +680,6 @@ fun WebDavBottomSheet(viewModel: WebViewModel, onDismiss: () -> Unit) {
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    // Save current local state to persistent storage
     fun saveConfig() = viewModel.saveWebDavConfig(WebDavConfig(davUrl, davUser, davPass, davAuto))
 
     ModalBottomSheet(
@@ -693,8 +699,6 @@ fun WebDavBottomSheet(viewModel: WebViewModel, onDismiss: () -> Unit) {
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(bottom = 16.dp)
             )
-            // BUG FIX: No longer saving on every keystroke (was calling EncryptedSharedPreferences
-            // per character, which is expensive). Config is saved on dismiss or before operations.
             OutlinedTextField(davUrl, { davUrl = it }, label = { Text("地址") },
                 modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp))
             OutlinedTextField(davUser, { davUser = it }, label = { Text("账号") },
@@ -711,7 +715,7 @@ fun WebDavBottomSheet(viewModel: WebViewModel, onDismiss: () -> Unit) {
                 Switch(checked = davAuto, onCheckedChange = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     davAuto = it
-                    saveConfig()  // Toggle saves immediately
+                    saveConfig()
                 })
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -812,4 +816,69 @@ fun SiteBottomSheet(site: WebSite?, viewModel: WebViewModel, onDismiss: () -> Un
             }
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AutoLoginScreen(navController: NavController, viewModel: WebViewModel) {
+    var selectedSite by remember { mutableStateOf<WebSite?>(null) }
+    
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("自动登录配置", fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    IconButton(onClick = { navController.popBackStack() }) {
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "返回")
+                    }
+                }
+            )
+        }
+    ) { paddingValues ->
+        LazyColumn(contentPadding = paddingValues, modifier = Modifier.fillMaxSize()) {
+            items(viewModel.webSites) { site ->
+                val cred = viewModel.getCredentialForUrl(site.url)
+                val subtitle = if (cred != null && cred.user.isNotBlank()) "已配置: ${cred.user}" else "未配置"
+                
+                SettingsCard(
+                    title = site.name,
+                    subtitle = subtitle,
+                    icon = Icons.Default.Public,
+                    onClick = { selectedSite = site }
+                )
+            }
+        }
+    }
+
+    selectedSite?.let { site ->
+        var user by remember { mutableStateOf(viewModel.getCredentialForUrl(site.url)?.user ?: "") }
+        var pass by remember { mutableStateOf(viewModel.getCredentialForUrl(site.url)?.pass ?: "") }
+        
+        AlertDialog(
+            onDismissRequest = { selectedSite = null },
+            title = { Text("配置 ${site.name}") },
+            text = {
+                Column {
+                    OutlinedTextField(value = user, onValueChange = { user = it }, label = { Text("账号/邮箱") })
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = pass, 
+                        onValueChange = { pass = it }, 
+                        label = { Text("密码") },
+                        visualTransformation = PasswordVisualTransformation()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = { 
+                    viewModel.saveCredential(site.url, user, pass)
+                    selectedSite = null 
+                }) { Text("保存") }
+            },
+            dismissButton = {
+                TextButton(onClick = { selectedSite = null }) { Text("取消") }
+            }
+        )
+    }
+}
 }
