@@ -1,4 +1,3 @@
-MainActivity.kt
 package com.example.webbox
 
 import android.os.Build
@@ -880,5 +879,4 @@ fun AutoLoginScreen(navController: NavController, viewModel: WebViewModel) {
             }
         )
     }
-}
 }
