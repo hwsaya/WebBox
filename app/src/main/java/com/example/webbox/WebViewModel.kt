@@ -1,4 +1,3 @@
-WebViewModel.kt
 package com.example.webbox
 
 import android.app.Application
