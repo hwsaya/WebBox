@@ -1,6 +1,7 @@
 package com.example.webbox
 
 import android.annotation.SuppressLint
+import android.graphics.Bitmap
 import android.net.http.SslError
 import android.view.ViewGroup
 import android.webkit.SslErrorHandler
@@ -66,6 +67,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -91,7 +93,6 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
     val context = LocalContext.current
     val isDarkTheme = isSystemInDarkTheme()
 
-    // Theme is a key: when it changes, a new WebView is created with correct dark mode settings
     val webView = remember(url, isDarkTheme) {
         WebViewPool.getOrCreateWebView(context, url, isDarkTheme)
     }
@@ -105,9 +106,29 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
     var showTabSwitcher by remember { mutableStateOf(false) }
     var cachedTabCount by remember { mutableIntStateOf(1) }
 
-    // 电脑模式状态
     val defaultUserAgent = remember { android.webkit.WebSettings.getDefaultUserAgent(context) }
     var isDesktopMode by remember(url) { mutableStateOf(false) }
+    val desktopModeState = rememberUpdatedState(isDesktopMode)
+
+    val desktopJs = """
+        (function() {
+            try {
+                var meta = document.querySelector('meta[name="viewport"]');
+                var content = 'width=1200, initial-scale=0.1, maximum-scale=5.0, user-scalable=yes';
+                if (meta) {
+                    if (meta.getAttribute('content') !== content) meta.setAttribute('content', content);
+                } else if (document.head) {
+                    meta = document.createElement('meta');
+                    meta.name = 'viewport';
+                    meta.content = content;
+                    document.head.appendChild(meta);
+                }
+                if (document.documentElement) {
+                    document.documentElement.style.minWidth = '1200px';
+                }
+            } catch(e) {}
+        })();
+    """.trimIndent()
 
     val mainContentScale by animateFloatAsState(
         targetValue = if (showTabSwitcher) 0.85f else 1f,
@@ -127,7 +148,7 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
         try {
             isBackStarted = true
             WebViewPool.captureSnapshot(url)
-            progressFlow.collect { /* consume back gesture progress */ }
+            progressFlow.collect {}
             if (canGoBack) webView.goBack() else navController.popBackStack()
         } finally {
             isBackStarted = false
@@ -163,7 +184,7 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
                             WebViewPool.captureSnapshot(url)
                             navController.popBackStack()
                         }) {
-                            Icon(Icons.Default.Home, "主页", modifier = Modifier.size(24.dp))
+                            Icon(Icons.Default.Home, null, modifier = Modifier.size(24.dp))
                         }
                         Text(
                             text = siteName,
@@ -173,19 +194,16 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold
                         )
-                        
-                        // 电脑模式切换按钮
                         IconButton(onClick = { isDesktopMode = !isDesktopMode }) {
                             Icon(
                                 imageVector = if (isDesktopMode) Icons.Default.Computer else Icons.Default.Smartphone,
-                                contentDescription = "电脑模式切换",
+                                contentDescription = null,
                                 modifier = Modifier.size(24.dp),
                                 tint = if (isDesktopMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-
                         IconButton(onClick = { webView.reload() }) {
-                            Icon(Icons.Default.Refresh, "刷新", modifier = Modifier.size(24.dp))
+                            Icon(Icons.Default.Refresh, null, modifier = Modifier.size(24.dp))
                         }
                         IconButton(onClick = {
                             WebViewPool.captureSnapshot(url)
@@ -232,9 +250,18 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
                             canGoBack = view.canGoBack()
                             super.doUpdateVisitedHistory(view, url, isReload)
                         }
+                        override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                            super.onPageStarted(view, url, favicon)
+                            if (desktopModeState.value) view.evaluateJavascript(desktopJs, null)
+                        }
+                        override fun onPageFinished(view: WebView, url: String?) {
+                            super.onPageFinished(view, url)
+                            if (desktopModeState.value) view.evaluateJavascript(desktopJs, null)
+                        }
                     }
                     webView.webChromeClient = object : WebChromeClient() {
                         override fun onProgressChanged(view: WebView, newProgress: Int) {
+                            if (desktopModeState.value) view.evaluateJavascript(desktopJs, null)
                             if (newProgress == 100) WebViewPool.captureSnapshot(url)
                         }
                     }
@@ -244,14 +271,19 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
                     webView
                 },
                 update = { view ->
-                    // 动态应用电脑端 User-Agent 和缩放配置
-                    val desktopUa = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
-                    val targetUa = if (isDesktopMode) desktopUa else defaultUserAgent
+                    val targetUa = if (isDesktopMode) {
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                    } else {
+                        defaultUserAgent
+                    }
 
                     if (view.settings.userAgentString != targetUa) {
                         view.settings.userAgentString = targetUa
                         view.settings.loadWithOverviewMode = isDesktopMode
                         view.settings.useWideViewPort = isDesktopMode
+                        view.settings.setSupportZoom(isDesktopMode)
+                        view.settings.builtInZoomControls = isDesktopMode
+                        view.settings.displayZoomControls = false
                         view.reload()
                     }
 
@@ -294,7 +326,7 @@ fun TabSwitcherOverlay(
             TopAppBar(
                 title = { Text("标签页", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
                 navigationIcon = {
-                    IconButton(onClick = onClose) { Icon(Icons.Default.Close, "关闭面板") }
+                    IconButton(onClick = onClose) { Icon(Icons.Default.Close, null) }
                 },
                 actions = {
                     IconButton(onClick = {
@@ -302,7 +334,7 @@ fun TabSwitcherOverlay(
                         onClose()
                         navController.popBackStack("home", false)
                     }) {
-                        Icon(Icons.Default.Add, "新标签页")
+                        Icon(Icons.Default.Add, null)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
@@ -370,7 +402,7 @@ fun TabSwitcherOverlay(
                                 },
                                 modifier = Modifier.size(24.dp)
                             ) {
-                                Icon(Icons.Default.Close, "关闭", modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Close, null, modifier = Modifier.size(16.dp))
                             }
                         }
                         Box(
