@@ -47,11 +47,15 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -105,6 +109,7 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
     var isBackStarted by remember { mutableStateOf(false) }
     var showTabSwitcher by remember { mutableStateOf(false) }
     var cachedTabCount by remember { mutableIntStateOf(1) }
+    var showMenu by remember { mutableStateOf(false) }
 
     val defaultUserAgent = remember { android.webkit.WebSettings.getDefaultUserAgent(context) }
     var isDesktopMode by remember(url) { mutableStateOf(false) }
@@ -194,17 +199,52 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold
                         )
-                        IconButton(onClick = { isDesktopMode = !isDesktopMode }) {
-                            Icon(
-                                imageVector = if (isDesktopMode) Icons.Default.Computer else Icons.Default.Smartphone,
-                                contentDescription = null,
-                                modifier = Modifier.size(24.dp),
-                                tint = if (isDesktopMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        
+                        Box {
+                            IconButton(onClick = { showMenu = true }) {
+                                Icon(Icons.Default.MoreVert, null, modifier = Modifier.size(24.dp))
+                            }
+                            DropdownMenu(
+                                expanded = showMenu,
+                                onDismissRequest = { showMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("刷新网页") },
+                                    onClick = { 
+                                        showMenu = false
+                                        webView.reload() 
+                                    },
+                                    leadingIcon = { Icon(Icons.Default.Refresh, null, modifier = Modifier.size(20.dp)) }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(if (isDesktopMode) "切换手机模式" else "切换电脑模式") },
+                                    onClick = { 
+                                        showMenu = false
+                                        isDesktopMode = !isDesktopMode 
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = if (isDesktopMode) Icons.Default.Smartphone else Icons.Default.Computer,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("翻译网页") },
+                                    onClick = {
+                                        showMenu = false
+                                        val currentUrl = webView.url ?: url
+                                        if (!currentUrl.startsWith("https://translate.google.com")) {
+                                            val translateUrl = "https://translate.google.com/translate?sl=auto&tl=zh-CN&u=" + URLEncoder.encode(currentUrl, "UTF-8")
+                                            webView.loadUrl(translateUrl)
+                                        }
+                                    },
+                                    leadingIcon = { Icon(Icons.Default.Translate, null, modifier = Modifier.size(20.dp)) }
+                                )
+                            }
                         }
-                        IconButton(onClick = { webView.reload() }) {
-                            Icon(Icons.Default.Refresh, null, modifier = Modifier.size(24.dp))
-                        }
+
                         IconButton(onClick = {
                             WebViewPool.captureSnapshot(url)
                             cachedTabCount = WebViewPool.getCachedUrls().size.coerceAtLeast(1)
