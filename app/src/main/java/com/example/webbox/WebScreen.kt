@@ -45,18 +45,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Smartphone
-import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -191,6 +186,7 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
                         }) {
                             Icon(Icons.Default.Home, null, modifier = Modifier.size(24.dp))
                         }
+                        
                         Text(
                             text = siteName,
                             modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
@@ -199,51 +195,6 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold
                         )
-                        
-                        Box {
-                            IconButton(onClick = { showMenu = true }) {
-                                Icon(Icons.Default.MoreVert, null, modifier = Modifier.size(24.dp))
-                            }
-                            DropdownMenu(
-                                expanded = showMenu,
-                                onDismissRequest = { showMenu = false }
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("刷新网页") },
-                                    onClick = { 
-                                        showMenu = false
-                                        webView.reload() 
-                                    },
-                                    leadingIcon = { Icon(Icons.Default.Refresh, null, modifier = Modifier.size(20.dp)) }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text(if (isDesktopMode) "切换手机模式" else "切换电脑模式") },
-                                    onClick = { 
-                                        showMenu = false
-                                        isDesktopMode = !isDesktopMode 
-                                    },
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = if (isDesktopMode) Icons.Default.Smartphone else Icons.Default.Computer,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("翻译网页") },
-                                    onClick = {
-                                        showMenu = false
-                                        val currentUrl = webView.url ?: url
-                                        if (!currentUrl.startsWith("https://translate.google.com")) {
-                                            val translateUrl = "https://translate.google.com/translate?sl=auto&tl=zh-CN&u=" + URLEncoder.encode(currentUrl, "UTF-8")
-                                            webView.loadUrl(translateUrl)
-                                        }
-                                    },
-                                    leadingIcon = { Icon(Icons.Default.Translate, null, modifier = Modifier.size(20.dp)) }
-                                )
-                            }
-                        }
 
                         IconButton(onClick = {
                             WebViewPool.captureSnapshot(url)
@@ -270,6 +221,57 @@ fun WebScreen(url: String, navController: NavController, viewModel: WebViewModel
                                         )
                                     )
                                 )
+                            }
+                        }
+
+                        Box(contentAlignment = Alignment.TopEnd) {
+                            IconButton(onClick = { showMenu = true }) {
+                                Icon(Icons.Default.MoreVert, null, modifier = Modifier.size(24.dp))
+                            }
+                            MiuixMenu(
+                                expanded = showMenu,
+                                onDismissRequest = { showMenu = false }
+                            ) {
+                                MiuixMenuItem("刷新网页") {
+                                    showMenu = false
+                                    webView.reload()
+                                }
+                                HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
+                                MiuixMenuItem(if (isDesktopMode) "切换手机模式" else "切换电脑模式") {
+                                    showMenu = false
+                                    isDesktopMode = !isDesktopMode
+                                }
+                                HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
+                                MiuixMenuItem("翻译网页") {
+                                    showMenu = false
+                                    val js = """
+                                        (function() {
+                                            if (document.getElementById('google_translate_element')) return;
+                                            var div = document.createElement('div');
+                                            div.id = 'google_translate_element';
+                                            div.style.position = 'fixed';
+                                            div.style.top = '0';
+                                            div.style.left = '0';
+                                            div.style.width = '100%';
+                                            div.style.zIndex = '2147483647';
+                                            div.style.backgroundColor = '#fff';
+                                            div.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+                                            document.body.insertBefore(div, document.body.firstChild);
+
+                                            var script = document.createElement('script');
+                                            script.type = 'text/javascript';
+                                            script.src = 'https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit';
+                                            document.head.appendChild(script);
+
+                                            window.googleTranslateElementInit = function() {
+                                                new google.translate.TranslateElement({
+                                                    pageLanguage: 'auto'
+                                                }, 'google_translate_element');
+                                            };
+                                        })();
+                                    """.trimIndent()
+                                    webView.evaluateJavascript(js, null)
+                                }
                             }
                         }
                     }
